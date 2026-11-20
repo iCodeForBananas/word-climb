@@ -1,0 +1,173 @@
+# Pushing a version tag (git tag v1.2.0 && git push origin v1.2.0) ships a
+# release:
+#
+#   Android  signed .aab uploaded to Google Play (internal testing track),
+#            signed .apk attached to the GitHub release
+#   iOS      signed build uploaded to App Store Connect (shows up in TestFlight)
+#
+# Each store job checks for its secrets first and skips itself, with a
+# warning, when they are not set, so forks and a not-yet-configured repo
+# still get a green run. docs/RELEASING.md lists the secrets and how to make
+# them.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      play_track:
+        description: Google Play track
+        default: internal
+        type: choice
+        options: [internal, alpha, beta, production]
+
+permissions:
+  contents: write
+
+env:
+  # v1.2.0 -> 1.2.0. A manual run without a tag falls back to 0.0.<run>.
+  VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('0.0.{0}', github.run_number) }}
+  # Must rise with every store upload; this workflow's run counter does.
+  BUILD_NUMBER: ${{ github.run_number }}
+
+jobs:
+  android:
+    name: Android to Google Play
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for signing secrets
+        id: check
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; skipping the Android release. See docs/RELEASING.md."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.check.outputs.skip != 'true'
+        uses: actions/checkout@v4
+      - if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - if: steps.check.outputs.skip != 'true'
+        run: npm ci && npm test && npm run build && npx cap sync android
+      - name: Build signed bundle and APK
+        if: steps.check.outputs.skip != 'true'
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          VERSION="${VERSION_NAME#v}"
+          ./gradlew bundleRelease assembleRelease --no-daemon \
+            -PversionCode="$BUILD_NUMBER" -PversionName="$VERSION"
+          cp app/build/outputs/bundle/release/app-release.aab "$RUNNER_TEMP/WordClimb-$VERSION.aab"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/WordClimb-$VERSION.apk"
+      - if: steps.check.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: WordClimb-android-release
+          path: ${{ runner.temp }}/WordClimb-*
+      - name: Check for Play credentials
+        id: play
+        if: steps.check.outputs.skip != 'true'
+        env:
+          PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$PLAY_JSON" ]; then
+            echo "::warning::PLAY_SERVICE_ACCOUNT_JSON is not set; built and signed, but not uploaded to Google Play."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload to Google Play
+        if: steps.check.outputs.skip != 'true' && steps.play.outputs.skip != 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.icodeforbananas.wordclimb
+          releaseFiles: ${{ runner.temp }}/WordClimb-*.aab
+          track: ${{ inputs.play_track || 'internal' }}
+          # Until the app has passed its first review, Play only accepts drafts.
+          status: ${{ vars.PLAY_RELEASE_STATUS || 'draft' }}
+      - name: Attach APK to the GitHub release
+        if: steps.check.outputs.skip != 'true' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes --title "Word Climb $GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/WordClimb-*.apk --clobber
+
+  ios:
+    name: iOS to App Store Connect
+    runs-on: macos-26
+    steps:
+      - name: Check for App Store Connect secrets
+        id: check
+        env:
+          KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$TEAM" ]; then
+            echo "::warning::App Store Connect secrets are not set; skipping the iOS release. See docs/RELEASING.md."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.check.outputs.skip != 'true'
+        uses: actions/checkout@v4
+      - if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.check.outputs.skip != 'true'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - if: steps.check.outputs.skip != 'true'
+        run: npm ci && npm test && npm run build && npx cap sync ios
+      - name: Archive and upload
+        if: steps.check.outputs.skip != 'true'
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}" > "$KEY_PATH"
+          VERSION="${VERSION_NAME#v}"
+          AUTH=(-allowProvisioningUpdates
+                -authenticationKeyPath "$KEY_PATH"
+                -authenticationKeyID "$KEY_ID"
+                -authenticationKeyIssuerID "$ISSUER_ID")
+
+          # Cloud-managed signing: Xcode creates the certificate and profile
+          # through the API key, so no .p12 or profile is stored in the repo.
+          xcodebuild archive \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/WordClimb.xcarchive" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            "${AUTH[@]}"
+
+          sed "s/TEAM_ID/$TEAM_ID/" ios/App/ExportOptions/AppStore.plist > "$RUNNER_TEMP/ExportOptions.plist"
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/WordClimb.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            "${AUTH[@]}"

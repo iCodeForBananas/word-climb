@@ -1,0 +1,48 @@
+{
+  "name": "word-climb",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "sync": "npm run build && cap sync",
+    "android": "npm run sync && cap open android",
+    "ios": "npm run sync && cap open ios",
+    "assets": "capacitor-assets generate --iconBackgroundColor #2b6cb0 --iconBackgroundColorDark #2b6cb0 --splashBackgroundColor #dcebf7 --splashBackgroundColorDark #dcebf7 --ios --android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/ios": "^8.6.2",
+    "@fontsource/andika": "^5.3.0",
+    "canvas-confetti": "^1.9.4",
+    "lucide-react": "^0.564.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^4.0.0",
+    "@capacitor/cli": "^8.6.2",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.0",
+    "tailwindcss": "^4",
+    "typescript": "5.9.3",
+    "vite": "^8.0.0",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.0.0",
+    "workbox-window": "^7.4.1"
+  },
+  "description": "A reading game for kids in kindergarten through grade 3: sight words, phonics and sentences, one rung at a time. iOS, Android and web.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iCodeForBananas/word-climb.git"
+  }
+}
