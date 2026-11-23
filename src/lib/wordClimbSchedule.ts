@@ -2,11 +2,14 @@
  * Word Climb's scheduler: SuperMemo SM-2 (Wozniak, 1987) plus the rules for
  * moving up the reading ladder. Pure functions, so "today" is always passed in.
  *
- * The four buttons map onto SM-2's 0-5 quality scale the way Anki's do:
+ * The game asks one yes/no question per card: did the child read it without
+ * help? Yes is SM-2 quality 4 ("good"), No is quality 1 ("again"). The
+ * scheduler still understands Hard and Easy, mapped onto SM-2's 0-5 scale the
+ * way Anki's are, so saved progress from any grading scheme stays valid:
  *
- *   Again 1   needed help              repetitions reset, due tomorrow
+ *   Again 1   needed help (No)         repetitions reset, due tomorrow
  *   Hard  3   got it, with a struggle  counts as a pass, ease drops 0.14
- *   Good  4   read it without help     ease unchanged
+ *   Good  4   read it without help     ease unchanged (Yes)
  *   Easy  5   read it instantly        ease rises 0.10
  *
  * Intervals are SM-2's: 1 day, then 6 days, then the previous interval times
@@ -157,6 +160,8 @@ export interface QueueItem {
   cardId: string;
   /** A same-session repeat of a missed card, which leaves the schedule alone. */
   redrill: boolean;
+  /** For a repeat: how many times this card has come back this round. */
+  tries?: number;
 }
 
 export function dueCards(states: CardStates, today: string): Card[] {
@@ -175,14 +180,28 @@ export function newCards(states: CardStates): Card[] {
  * Trims the queue to the slots left in the round, then fills any gap: reviews
  * first, overdue before due, then new cards up the ladder. Filling as the round
  * goes means a level that opens mid-round feeds its cards into the same round.
+ *
+ * A card's first retry after "Not yet" always keeps its place, even if that
+ * runs the round a card or two past its size, so a word missed near the end
+ * still gets practiced today. Later retries of the same card don't, so a round
+ * can't run on forever.
  */
 export function topUpQueue(queue: QueueItem[], states: CardStates, today: string, slots: number): QueueItem[] {
   const open = Math.max(0, slots);
-  const kept = queue.slice(0, open);
+  const kept: QueueItem[] = [];
+  let used = 0;
+  for (const item of queue) {
+    if (used < open) {
+      kept.push(item);
+      used++;
+    } else if (item.redrill && (item.tries ?? 1) === 1) {
+      kept.push(item);
+    }
+  }
   const queued = new Set(kept.map((item) => item.cardId));
   const extra = [...dueCards(states, today), ...newCards(states)]
     .filter((card) => !queued.has(card.id))
-    .slice(0, open - kept.length)
+    .slice(0, open - used)
     .map((card) => ({ cardId: card.id, redrill: false }));
   return [...kept, ...extra];
 }
@@ -196,7 +215,36 @@ export function advanceQueue(queue: QueueItem[], grade: Grade): QueueItem[] {
   const [current, ...rest] = queue;
   if (!current || GRADE_QUALITY[grade] >= 4) return rest;
   const at = Math.min(REDRILL_GAP, rest.length);
-  return [...rest.slice(0, at), { cardId: current.cardId, redrill: true }, ...rest.slice(at)];
+  const retry = { cardId: current.cardId, redrill: true, tries: (current.tries ?? 0) + 1 };
+  return [...rest.slice(0, at), retry, ...rest.slice(at)];
+}
+
+export interface Round {
+  states: CardStates;
+  queue: QueueItem[];
+  /** Cards shown so far this round, repeats included. */
+  shown: number;
+}
+
+export function startRound(states: CardStates, today: string): Round {
+  return { states, queue: buildRound(states, today), shown: 0 };
+}
+
+/**
+ * One answer to the card at the front of the round. Schedules it (unless it
+ * was a same-round repeat), sends it back in after a miss, and tops the queue
+ * up, so a level that opens mid-round feeds into the same round. The app and
+ * the progression tests both play through this, so the tests exercise exactly
+ * what a child sees.
+ */
+export function answerCard(round: Round, grade: Grade, today: string, now: number): Round {
+  const item = round.queue[0];
+  if (!item) return round;
+  const states = item.redrill
+    ? round.states
+    : { ...round.states, [item.cardId]: applyGrade(round.states[item.cardId] ?? NEW_CARD_STATE, grade, today, now) };
+  const shown = round.shown + 1;
+  return { states, shown, queue: topUpQueue(advanceQueue(round.queue, grade), states, today, ROUND_SIZE - shown) };
 }
 
 // ─── Saved progress ───────────────────────────────────────────────────────────

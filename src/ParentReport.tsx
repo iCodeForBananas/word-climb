@@ -67,7 +67,7 @@ export default function ParentReport({
                   Practiced on <b>{r.week.daysPracticed}</b> day{r.week.daysPracticed === 1 ? "" : "s"}, reading <b>{r.week.cardsRead}</b> cards.
                 </li>
                 <li>
-                  Read <b>{pct(r.week.unaided)}</b> without help on the first try.
+                  Read <b>{pct(r.week.unaided)}</b> without help on the first try (scheduled cards, not same-round retries).
                 </li>
                 {r.week.newlyKnown.length > 0 && (
                   <li>

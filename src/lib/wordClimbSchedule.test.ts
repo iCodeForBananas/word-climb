@@ -195,6 +195,14 @@ describe("sessions", () => {
     expect(topUpQueue(queue, {}, TODAY, -1)).toEqual([]);
   });
 
+  it("always keeps a missed card's first retry, even past the end of the round", () => {
+    const filler = { cardId: CARDS[1].id, redrill: false };
+    const first = { cardId: CARDS[0].id, redrill: true, tries: 1 };
+    const second = { cardId: CARDS[2].id, redrill: true, tries: 2 };
+    expect(topUpQueue([filler, first, second], {}, TODAY, 0)).toEqual([first]);
+    expect(topUpQueue([filler, first], {}, TODAY, 1)).toEqual([filler, first]);
+  });
+
   it("puts due reviews ahead of new cards, oldest first", () => {
     const [a, b] = CARDS;
     const states: CardStates = {
@@ -225,11 +233,11 @@ describe("sessions", () => {
   it.each(["again", "hard"] as const)("brings a card graded %s back after a gap", (g) => {
     const next = advanceQueue(queue, g);
     expect(next).toHaveLength(6);
-    expect(next[REDRILL_GAP]).toEqual({ cardId: "a", redrill: true });
+    expect(next[REDRILL_GAP]).toEqual({ cardId: "a", redrill: true, tries: 1 });
   });
 
   it("repeats the last card when nothing else is left", () => {
-    expect(advanceQueue([queue[0]], "again")).toEqual([{ cardId: "a", redrill: true }]);
+    expect(advanceQueue([queue[0]], "again")).toEqual([{ cardId: "a", redrill: true, tries: 1 }]);
   });
 });
 

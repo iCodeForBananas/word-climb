@@ -10,8 +10,10 @@ sentences:
 - **Phrases and sentences**: written for the game against a controlled
   vocabulary, so a sentence only uses words the ladder has already taught
 
-The child reads each card out loud and a grown-up taps how it went: **Again**
-(needed help), **Hard**, **Good** or **Easy**. Spaced repetition (SM-2, the
+The child reads each card out loud and a grown-up answers one question: did
+they read it without help? **Yes** or **Not yet**, then on to the next card. A
+"Not yet" card comes back a few cards later for another try. Spaced
+repetition (SM-2, the
 algorithm behind Anki) decides when each card comes back. A card counts as
 known once it's read without help on two different days, and the next level
 opens when 80% of the current one is known.

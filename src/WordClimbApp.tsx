@@ -12,11 +12,9 @@ import {
   type QueueItem,
   NEW_CARD_STATE,
   ROUND_SIZE,
-  advanceQueue,
-  applyGrade,
+  answerCard,
   buildRound,
   localDay,
-  topUpQueue,
   unlockedLevelCount,
 } from "./lib/wordClimbSchedule";
 import { type ReadingLog, currentLevel, ladder, loadCards, loadLog, logGrade, saveCards, saveLog } from "./lib/readingLog";
@@ -25,15 +23,14 @@ import { type ReadingLog, currentLevel, ladder, loadCards, loadLog, logGrade, sa
 // ./lib/wordClimbSchedule.ts and what's remembered (plus the parent report)
 // in ./lib/readingLog.ts. This file owns the screens.
 //
-// How a round works: the child reads the card aloud and a grown-up taps how
-// it went. Again and Hard bring the card back a few cards later in the same
-// round; those repeats don't change its schedule.
+// How a round works: the child reads the card aloud and a grown-up answers
+// one question: did they read it without help? Yes or Not yet, then straight
+// on to the next card. A "Not yet" card comes back a few cards later in the
+// same round for another try; that repeat doesn't change its schedule.
 
-const GRADE_TILES: { grade: Grade; label: string; hint: string; fill: string }[] = [
-  { grade: "again", label: "Again", hint: "Needed help", fill: "bg-again" },
-  { grade: "hard", label: "Hard", hint: "Got it slowly", fill: "bg-hard" },
-  { grade: "good", label: "Good", hint: "Read it", fill: "bg-good" },
-  { grade: "easy", label: "Easy", hint: "Instantly", fill: "bg-easy" },
+const ANSWERS: { grade: Grade; label: string; hint: string; fill: string; keys: string[] }[] = [
+  { grade: "again", label: "Not yet", hint: "Needed help", fill: "bg-again", keys: ["1", "n", "ArrowLeft"] },
+  { grade: "good", label: "Yes!", hint: "Read it", fill: "bg-good", keys: ["2", "y", "ArrowRight"] },
 ];
 
 /** The biggest type that still fits the card, from a phone up to a full-width tablet. */
@@ -82,11 +79,11 @@ export default function WordClimbApp() {
     if (!item) return;
     setHistory((h) => [...h, { queue, states, log }]);
 
-    let nextStates = states;
+    const next = answerCard({ states, queue, shown: history.length }, grade, today, Date.now());
+    const nextStates = next.states;
     if (!item.redrill) {
       const before = states[item.cardId] ?? NEW_CARD_STATE;
-      const after = applyGrade(before, grade, today, Date.now());
-      nextStates = { ...states, [item.cardId]: after };
+      const after = nextStates[item.cardId];
       const opened = unlockedLevelCount(nextStates);
       if (opened > unlockedLevelCount(states)) {
         setLevelUp(LEVELS[opened - 1].title);
@@ -99,10 +96,8 @@ export default function WordClimbApp() {
       setLog(logGrade(log, { cardId: item.cardId, grade, day: today, redrill: true }, false));
     }
 
-    const shown = history.length + 1;
-    const next = topUpQueue(advanceQueue(queue, grade), nextStates, today, ROUND_SIZE - shown);
-    setQueue(next);
-    if (!next.length) setScreen("round-over");
+    setQueue(next.queue);
+    if (!next.queue.length) setScreen("round-over");
   };
 
   const undo = () => {
@@ -115,13 +110,14 @@ export default function WordClimbApp() {
     setScreen("playing");
   };
 
-  // Number keys 1-4 grade too. No dependency array: handleGrade closes over state.
+  // Keys answer too: 1 / N / ← for Not yet, 2 / Y / → for Yes. No dependency
+  // array: handleGrade closes over state.
   useEffect(() => {
     if (screen !== "playing") return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-      const tile = GRADE_TILES[Number(e.key) - 1];
-      if (tile) handleGrade(tile.grade);
+      const answer = ANSWERS.find((a) => a.keys.includes(e.key.length === 1 ? e.key.toLowerCase() : e.key));
+      if (answer) handleGrade(answer.grade);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -229,18 +225,18 @@ export default function WordClimbApp() {
           </div>
 
           <div className='px-3 pb-3 shrink-0'>
-            <div className='text-center text-sm font-bold text-ink-muted mb-2'>Grown-up: how did it go?</div>
-            <div className='grid grid-cols-4 gap-2 sm:gap-3'>
-              {GRADE_TILES.map((tile, index) => (
+            <div className='text-center text-sm font-bold text-ink-muted mb-2'>Grown-up: did they read it without help?</div>
+            <div className='grid grid-cols-2 gap-3'>
+              {ANSWERS.map((answer) => (
                 <button
-                  key={tile.grade}
+                  key={answer.grade}
                   type='button'
-                  aria-keyshortcuts={String(index + 1)}
-                  onClick={() => handleGrade(tile.grade)}
-                  className={`h-20 md:h-28 rounded-2xl text-white flex flex-col items-center justify-center select-none touch-manipulation active:brightness-90 ${tile.fill}`}
+                  aria-keyshortcuts={answer.keys[0]}
+                  onClick={() => handleGrade(answer.grade)}
+                  className={`h-24 md:h-32 rounded-2xl text-white flex flex-col items-center justify-center select-none touch-manipulation active:brightness-90 ${answer.fill}`}
                 >
-                  <span className='text-xl md:text-3xl font-bold'>{tile.label}</span>
-                  <span className='text-xs md:text-sm opacity-90'>{tile.hint}</span>
+                  <span className='text-3xl md:text-4xl font-bold'>{answer.label}</span>
+                  <span className='text-sm md:text-base opacity-90'>{answer.hint}</span>
                 </button>
               ))}
             </div>
