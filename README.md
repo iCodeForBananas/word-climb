@@ -1,5 +1,7 @@
 # Word Climb ⛰️
 
+![Word Climb: a reading game for kids in K–3](docs/marquee/marquee.png)
+
 A reading game for kids in kindergarten through grade 3. The child climbs a
 mountain one level at a time, from their first sight words to long grade 3
 sentences:
